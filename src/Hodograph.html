@@ -1,0 +1,415 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Hodograph</title>
+
+	<script src="../WebGLlibrary/webgl-fmi.js"></script>
+	<script src="../shaders/shaders.js"></script>
+	
+	<style>
+		body {
+			text-align: center;
+		}
+
+		canvas {
+			border: solid 1px Black;
+		}
+	</style>
+	
+	<script>
+		//брой точки
+		n = 0;
+		
+		//параметър t 
+		tParam = 0.5;
+		
+		// крива на Безие - конструктор
+		function BezierCurve(points, N)
+		{
+			var data = [];
+			
+			// координати на контролните точки за рисуване на контура
+			for (var i=0; i<N; i++)
+			for (var j=0; j<3; j++)
+				data.push(points[i].center[j]);
+			
+			// използвани само за удобство и краткост
+			function X(i) { return points[i].center[0]; }
+			function Y(i) { return points[i].center[1]; }
+			
+			// обхождане на кривата
+			for (var t=0; t<1.02; t+=0.02)
+			{
+				var x=0;
+				var y=0;
+				for (var i=0; i<N; i++)
+				{
+					x += (factorial(N-1)/(factorial(N-1-i)*factorial(i)))*fastPow(t,i)*fastPow(1-t,N-1-i)*X(i);
+					y += (factorial(N-1)/(factorial(N-1-i)*factorial(i)))*fastPow(t,i)*fastPow(1-t,N-1-i)*Y(i);
+				}
+				data.push(x,y,0);
+			}
+			
+			this.buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+			this.N = data.length/3;
+			this.color = [1,0,0];
+		}
+		
+		// крива на Безие - рисуване
+		BezierCurve.prototype.draw = function(N)
+		{
+			pushMatrix();
+				gl.vertexAttrib3fv(aNormal,[0,0,1]);
+				useMatrix();
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.disableVertexAttribArray(aNormal);
+				gl.enableVertexAttribArray(aXYZ);
+				gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+				
+				// рисуване на самата крива
+				gl.vertexAttrib3fv(aColor,this.color);
+				gl.drawArrays(gl.LINE_STRIP,N,this.N-N);
+				
+				// рисуване на контура
+				gl.vertexAttrib3fv(aColor,[0.6,0.6,1]);
+				gl.drawArrays(gl.LINE_STRIP,0,N);
+			popMatrix();
+		}
+		
+		// крива на Безие - деструктор
+		BezierCurve.prototype.free = function()
+		{
+			gl.deleteBuffer(this.buf);
+		}
+		
+		//Ходограф
+		function Hodograph()
+		{
+			hodoPoints = [];
+			hodoLines = [];
+			
+			for (var i=1; i<n; i++){
+				hodoLines.push(195,0,0);
+				hodoPoints.push(custom(new Sphere([195+pts[i].center[0]-pts[i-1].center[0],pts[i].center[1]-pts[i-1].center[1],0],5),{color:[1,0.5,0]}) );
+				hodoLines.push(hodoPoints[i-1].center[0],hodoPoints[i-1].center[1],0);
+				
+				//ако векторите излизат мащабираме Ходографа
+				if(hodoPoints[i-1].center[0] < 15 || hodoPoints[i-1].center[0] > 395 ||
+					hodoPoints[i-1].center[1] < -245 || hodoPoints[i-1].center[1] > 245)
+				{ HodographResize(); return;}
+			}
+		}
+		
+		//мащабиране на Ходографа, ако векторите излизат
+		function HodographResize()
+		{
+			hodoPoints = [];
+			hodoLines = [];
+			
+			for (var i=1; i<n; i++){
+				hodoLines.push(195,0,0);
+				hodoPoints.push(custom(new Sphere([195+(pts[i].center[0]-pts[i-1].center[0])/2,(pts[i].center[1]-pts[i-1].center[1])/2,0],5),{color:[1,0.5,0]}) );
+				hodoLines.push(hodoPoints[i-1].center[0],hodoPoints[i-1].center[1],0);
+			}
+		}
+		
+		//функция за точка върху кривата на Безие спрямо t
+		// и отсечките при делението
+		function tBallCurveFunc(points, t)
+		{
+			var data = [];
+			var tPoints = [];
+			
+			// използвани само за удобство и краткост
+			function X(i) { return points[i].center[0]; }
+			function Y(i) { return points[i].center[1]; } 
+			
+			//слагаме началните точки
+			for (var i=0; i<n; i++)
+				tPoints.push([X(i),Y(i),0]);
+			
+			//пресмятаме къде е точката върху кривата на Безие спрямо t
+			var x=0;
+			var y=0;
+			for (var i=0; i<n; i++)
+			{
+				x += (factorial(n-1)/(factorial(n-1-i)*factorial(i)))*fastPow(t,i)*fastPow(1-t,n-1-i)*X(i);
+				y += (factorial(n-1)/(factorial(n-1-i)*factorial(i)))*fastPow(t,i)*fastPow(1-t,n-1-i)*Y(i);
+			}
+			tBallCurve.center=[x,y,5];
+			
+			//рисуваме делението на отсечките
+			while(tPoints.length > 2)
+			{
+				data = [];
+				var len = tPoints.length;
+				for (var i=0; i<len-1; i++)
+				{
+					tPoints.push([(tPoints[i+1][0]-tPoints[i][0])*t + tPoints[i][0], (tPoints[i+1][1]-tPoints[i][1])*t + tPoints[i][1], 0]);
+					data.push((tPoints[i+1][0]-tPoints[i][0])*t + tPoints[i][0], (tPoints[i+1][1]-tPoints[i][1])*t + tPoints[i][1], 0);
+				}
+				
+				tPoints.splice(0,len);
+				
+				
+				this.buf = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+				
+				pushMatrix();
+					gl.vertexAttrib3fv(aNormal,[0,0,1]);
+					useMatrix();
+					gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+					gl.disableVertexAttribArray(aNormal);
+					gl.enableVertexAttribArray(aXYZ);
+					gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+					
+					// рисуване на отсечките
+					gl.vertexAttrib3fv(aColor,[0,1,0]);
+					gl.drawArrays(gl.LINE_STRIP,0,data.length/3);
+				popMatrix();
+				
+				gl.deleteBuffer(this.buf);
+				
+			}
+		}
+		
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			// прехващане на мишката само над графичното поле
+			canvas.addEventListener('mousemove',mouseMove,false);
+			canvas.addEventListener('mousedown',mouseDown,false);
+			canvas.addEventListener('mouseup',mouseUp,false);
+			
+			init();
+			drawFrame();
+		}
+		
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(1,1,1,1);
+
+			identity();
+			var proj=orthoMatrix(gl.canvas.width,gl.canvas.height,-1000,1000);
+			gl.uniformMatrix4fv(uProjectionMatrix,false,proj);
+			gl.uniform1i(uUseNormalMatrix,false);
+
+			gl.uniform3f(uAmbientColor,1,1,1);
+			gl.uniform3f(uDiffuseColor,1,1,1);
+			gl.uniform3f(uLightDir,0,0,1);
+
+			// създаване на масив за контролни точки и линии
+			pts = [];
+			hodoPoints = [];
+			hodoLines = [];
+			
+			//разделителна линия
+			line = new Cuboid([-195,0,-50],[410,500,1]);
+			line.color = [0,0,0];
+			
+			//център на ходографа
+			hodoCenter = new Sphere([195,0,0],5);
+			hodoCenter.color = [0,0,0];
+			
+			//интервал за t
+			interval = new Cuboid([-195,-240,0],[100,3,1]);
+			interval.color= [0.6,1,0.6];
+			tBallInterval = new Sphere([-195,-240,0],5);
+			tBallInterval.color = [0,1,0];
+			
+			//t върху кривата
+			tBallCurve = new Sphere([0,0,5],5);
+			tBallCurve.color = [0,1,0];
+		}
+
+		
+		function drawFrame()
+		{
+			time = now();
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+			
+			lookAt([0,0,30],[0,0,0],[0,1,0]);
+			
+			// рисуване на контролните точки
+			for (var i=0; i<n; i++)
+				pts[i].draw();
+			
+			Hodograph();			
+			hodoCenter.draw();
+			for (var i=0; i<n-1; i++)
+				hodoPoints[i].draw();
+
+			// създаване и рисуване на кривата
+			var curve = new BezierCurve(pts, n);
+			curve.draw(n);
+			curve.free();
+			
+			// създаване и рисуване на ходографа
+			if(n>0){
+				tBallCurveFunc(pts,tParam);
+				tBallCurve.draw();
+				
+				var hodoCurve = new BezierCurve(hodoPoints, n-1);
+				hodoCurve.draw(n-1);
+				hodoCurve.free();
+				
+				//вектори на ходографа
+				// попълваме WebGL буфер с тях
+				var vBuf = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER,vBuf);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hodoLines), gl.STATIC_DRAW);
+				
+				// рисуваме N линии
+				pushMatrix();
+					gl.enableVertexAttribArray(aXYZ);
+					gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0);
+					gl.vertexAttrib3f(aColor,0,0,0);
+					gl.drawArrays(gl.LINES,0,hodoLines.length/3);
+				popMatrix();
+				
+				gl.deleteBuffer(vBuf);
+			}
+			
+			line.draw();
+			interval.draw();
+			tBallInterval.draw();
+		}
+		
+		var selected = -1;
+		var mouseX = 0;
+		var mouseY = 0;
+		
+		//при натискане на мишката
+		function mouseDown(event)
+		{
+			if (event.button!=0 && event.button!=2) return				
+			var x = getX(event);
+			var y = getY(event);
+			
+			//ако сме натиснали ляв бутон гледаме дали сме хванали точка
+			if (event.button==0){
+				for(i=0; i<pts.length; i++)
+				{
+					if(Math.abs(x-pts[i].center[0]) <= 5 && 
+						Math.abs(y-pts[i].center[1]) <= 5){
+							selected = i;
+							mouseX = x;
+							mouseY = y;
+						}
+				}
+				
+				//точката за интервала
+				if (Math.abs(x-tBallInterval.center[0]) <= 5 && 
+						Math.abs(y-tBallInterval.center[1]) <= 5){
+							selected = -2;
+							mouseX = x;
+				}}
+			
+			//ако сме натиснали десен бутон
+			if (event.button==2){
+				for(i=0; i<pts.length; i++)
+				{
+					//ако сме върху точка я трием
+					if(Math.abs(x-pts[i].center[0]) <= 5 && 
+						Math.abs(y-pts[i].center[1]) <= 5){
+							pts.splice(i,1);
+							n--;
+						}
+				}}
+					
+			requestAnimationFrame(drawFrame);
+		}
+		
+		// при пускане на бутон
+		function mouseUp(event)
+		{	
+			if(event.button !=0) return;
+			var x = getX(event);
+			var y = getY(event);
+			
+			//ако пускаме ляв бутон и не сме държали точка, поставяме нова
+			if (event.button==0 && selected == -1 && x < 0 && y > -220)
+			{
+				pts.push(custom(new Sphere([x,y,0],5),{color:[0,0.5,1]}) );
+				n++;
+			}
+			//държали сме точка, преместваме я
+			else if (event.button==0 && selected >= 0 && x<0 && y > -220){
+				pts[selected].center = [x,y,0];
+			}
+			//местим интервала
+			else if(event.button==0 && selected == -2){
+				if(x>-245 && x<-145){
+					tBallInterval.center = [x,-240,0];
+					tParam = (x+245)/100;
+				}
+				else if (x>-145)
+					tParam = 1;
+				else
+					tParam = 0;
+			}
+			
+			selected = -1;
+			requestAnimationFrame(drawFrame);
+		}
+		
+		// при движение на мишката местим точките
+		function mouseMove(event)
+		{
+			if (event.button!=0 || selected == -1) return;
+			
+			var x = getX(event);
+			var y = getY(event);
+
+			// местене на точките
+			if (selected >=0 && x < 0 && y > -220)
+			{
+				pts[selected].center[0] += x-mouseX;
+				pts[selected].center[1] += y-mouseY;
+			}
+			
+			// местене на t
+			else if (selected == -2) 
+			{
+				if (x> -245 && x< -145){
+					tBallInterval.center[0] += x-mouseX;
+					tParam = (mouseX+245)/100;
+				}
+				else if (x>-145)
+					tParam = 1;
+				else
+					tParam = 0;
+			}
+			
+			mouseX = x;
+			mouseY = y;
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Bézier curve - Hodograph</h2>
+	<h3>Left button: add/ Right button: delete/ Left button + Drag: move</h3>
+	
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="800" height="500" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>
